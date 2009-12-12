@@ -42,7 +42,7 @@ type application =
 and user =
     { uid : int64;
       user_app : application;
-      session : (string * int32) option;
+      session : (string * float) option;
       added : bool;
       friends : user list;
       props : (string * string) list
@@ -116,7 +116,7 @@ let get_user app fbm =
       >>= (return $ Int64.of_string) with
 	| Some uid ->
 	    let session = M.findo ["session_key"; "profile_session_key"] fbm in
-	    let expiry = (M.findo ["expires"] fbm) >>= (return $ Int32.of_string) in
+	    let expiry = (M.findo ["expires"] fbm) >>= (return $ float_of_string) in
 	    lwt db = Util.Database.attach ~rm:false user_init app.app_db in
             let user = { load_user app db uid with
 			   session = session >>= (fun s ->
@@ -133,29 +133,43 @@ let user app req =
   let post = Http_request.params_post req in
   lwt fbp = validate_params app post in
     if StrMap.is_empty fbp then
-      lwt fbg = validate_params app (Http_request.params_get  req) in
+      lwt fbg = validate_params app (Http_request.params_get req) in
       lwt fbp = validate_params app ~ns:"fb_post_sig" post in
       let fbm = MStrMap.merge fbg fbp in
-        get_user app fbm
+	if StrMap.is_empty fbm then
+	  let cookies = Http_cookie.extract req in
+	  lwt fbc = validate_params app ~ns:app.app_key cookies in
+            get_user app fbc
+	else
+          get_user app fbm
     else
       get_user app fbp
 
-let gen_cookie user =
+let gen_cookies path user =
+  let make = Http_cookie.make in
+  let serialize = Http_cookie.serialize in
   let app = user.user_app in
-  let cookie = [("user", Int64.to_string user.uid)] in
-  let cookie = match user.session with
+  let domain = app.app_domain in
+  let cookies = [("user", Int64.to_string user.uid)] in
+  let cookies = match user.session with
     | Some (sess_key, expiry) ->
-	("session_key", sess_key) :: ("expires", Int32.to_string expiry) :: cookie
-    | None -> cookie in
-  let cm = AStrMap.into_map StrMap.empty cookie in
-  let cookie = List.map (fun (n,v) -> (app.app_key ^ "_" ^ n, v)) cookie in
-  let cookie = match user.session with
-    | Some (_, expiry) -> ("expires", Int32.to_string expiry) :: cookie
-    | None -> cookie in
-  let cookie = [(app.app_key, generate_sig app cm);
-		("domain", app.app_domain)] @ cookie in
-    String.concat "; " (List.map (fun (n,v) -> n ^ "=" ^ v) cookie)
-
+	("session_key", sess_key) :: ("expires", string_of_float expiry) :: cookies
+    | None -> cookies in
+  let cm = AStrMap.into_map StrMap.empty cookies in
+  let cookies = List.map (fun (n,v) -> (app.app_key ^ "_" ^ n, v)) cookies in
+  let cookies = (app.app_key, generate_sig app cm) :: cookies in
+    match user.session with
+      | Some (_, expiry) ->
+	  List.map
+	    (fun (n,v) ->
+	       serialize (make ~expiry:(`Until expiry) ~path ~domain n v))
+	    cookies
+      | None ->
+	  List.map
+	    (fun (n,v) ->
+	       serialize (make ~path ~domain n v))
+	    cookies
+	    
 (* QUERIES *)
 
 let std_params user meth params =
