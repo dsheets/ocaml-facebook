@@ -2,7 +2,7 @@ OCAMLMAKEFILE=OCamlMakefile
 
 SOURCES = util.ml api.ml
 PREDS = camlp4o
-PACKS = json-tc.syntax lwt.syntax orm.syntax orm lwt.unix cohttp
+PACKS = json-tc.syntax lwt.syntax lwt.unix cohttp
 RESULT = facebook
 LIB_PACK_NAME = facebook
 ANNOTATE = yes
