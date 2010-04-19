@@ -28,8 +28,9 @@ module StrMap = Map.Make(String)
 module AStrMap = Util.Assoc(StrMap)
 module MStrMap = Util.Map(StrMap)
 
-exception Timeout
-exception Bad_sig
+exception Facebook_error of string * exn list
+exception Facebook_timeout
+exception Facebook_bad_sig
 
 type application =
     { app_cookie_prefix : string option;
@@ -90,8 +91,8 @@ let validate_params app ?(ns="fb_sig") params =
 	  if check_timeout fbm then
 	    if check_sig fbm v then
 	      return fbm
-	    else fail Bad_sig
-	  else fail Timeout
+	    else fail Facebook_bad_sig
+	  else fail Facebook_timeout
       | None ->
 	  return StrMap.empty
 
@@ -234,6 +235,14 @@ struct
 
   let bind_value fn (k, v) = (k, fn v)
 
+  let attempt_post headers body url =
+    let rec post exnlist = function
+      | 0 -> fail (Facebook_error ("Cannot connect to Facebook", exnlist))
+      | n -> begin try_lwt Http_user_agent.post ~headers ~body url with
+	  | e -> post (e::exnlist) (n - 1)
+	end
+    in post [] 3
+
   let call_method ns user name params =
     let params = List.map (bind_value coerce) params in
     let get, post = std_params user ("facebook." ^ ns ^ "." ^ name) params in
@@ -241,7 +250,7 @@ struct
     let headers = [("User-Agent", "ocaml-facebook/0.1")] in
     let body = url_encode post in
     let url = facebook_http ^ "?" ^ qs in
-    lwt _, jsons = Http_user_agent.post ~headers ~body url in
+    lwt _, jsons = attempt_post headers body url in
       return jsons
 
   let loadr jsons =
