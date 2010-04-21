@@ -1,6 +1,10 @@
 OCAMLMAKEFILE=OCamlMakefile
 
-SOURCES = util.ml api.ml
+SOURCES = util.ml api.mli api.ml \
+	  namespace.mli namespace.ml \
+	  fql.mli fql.ml \
+	  users.mli users.ml \
+	  dashboard.mli dashboard.ml
 PREDS = camlp4o
 PACKS = json-tc.syntax lwt.syntax lwt.unix cohttp
 RESULT = facebook

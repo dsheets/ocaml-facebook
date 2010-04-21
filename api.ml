@@ -1,7 +1,7 @@
 (*
   ocaml-facebook - Facebook Platform client API in OCaml
 
-  Copyright (C) <2009> David Sheets <sheets@alum.mit.edu>
+  Copyright (C) <2009-2010> David Sheets <sheets@alum.mit.edu>
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU Library General Public License as
@@ -51,9 +51,6 @@ and user =
     }
 
 type user_table = (int64, user) Hashtbl.t
-
-let facebook_http  =  "http://api.facebook.com/restserver.php"
-let facebook_https = "https://api.facebook.com/restserver.php"
 
 let users : user_table = Hashtbl.create 10
 
@@ -169,6 +166,8 @@ let user app req =
     else
       get_user app fbp
 
+let uid user = user.uid
+
 let gen_cookies path user =
   let make = Http_cookie.make in
   let serialize = Http_cookie.serialize in
@@ -199,88 +198,3 @@ let gen_cookies path user =
 	    (fun (n,v) ->
 	       serialize (make ~path ~domain n v))
 	    cookies
-	    
-(* QUERIES *)
-
-let std_params user meth params =
-  let get = [("method", meth);
-	     ("api_key", user.user_app.app_key);
-	     ("v", "1.0")] in
-  let get = match user.session with None -> get
-    | Some (k, _) -> ("session_key", k) :: get in
-  let post = [("call_id", string_of_int user.user_app.seq);
-	      ("format", "JSON")] @ params in
-  let pmap = AStrMap.into_map StrMap.empty (get @ post) in
-  let () = user.user_app.seq <- user.user_app.seq + 1 in
-    (get, ("sig", generate_sig user.user_app pmap) :: post)
-
-let url_encode = Netencoding.Url.mk_url_encoded_parameters
-
-module Namespace =
-struct
-  let rec coerce = function
-    | `B f -> Int64.to_string f
-    | `D i -> string_of_int i
-    | `S s -> s
-    | `List v -> Json_io.string_of_json (json_of_list v)
-  and json_coerce = function
-    | `B f -> json_of_float f
-    | `D i -> json_of_int i
-    | `S s -> json_of_string s
-    | `List v -> json_of_list v
-  and json_of_int i = Json_type.Int i
-  and json_of_float f = Json_type.Float f
-  and json_of_string s = Json_type.String s
-  and json_of_list l = Json_type.Array (List.map json_coerce l)
-
-  let bind_value fn (k, v) = (k, fn v)
-
-  let attempt_post headers body url =
-    let rec post exnlist = function
-      | 0 -> fail (Facebook_error ("Cannot connect to Facebook", exnlist))
-      | n -> begin try_lwt Http_user_agent.post ~headers ~body url with
-	  | e -> post (e::exnlist) (n - 1)
-	end
-    in post [] 3
-
-  let call_method ns user name params =
-    let params = List.map (bind_value coerce) params in
-    let get, post = std_params user ("facebook." ^ ns ^ "." ^ name) params in
-    let qs = url_encode get in
-    let headers = [("User-Agent", "ocaml-facebook/0.1")] in
-    let body = url_encode post in
-    let url = facebook_http ^ "?" ^ qs in
-    lwt _, jsons = attempt_post headers body url in
-      return jsons
-
-  let loadr jsons =
-    return (Json_io.json_of_string jsons)
-end
-
-module Users =
-struct
-  include Namespace
-  let call user = call_method "users" user
-
-  let get_info user uids fields =
-    (call user "getInfo" [("uids", `List uids);
-			  ("fields", `List fields)]) >>= loadr
-
-  let get_standard_info user uids fields =
-    (call user "getStandardInfo" [("uids", `List uids);
-				  ("fields", `List fields)]) >>= loadr
-
-  (* TODO: Really? Mutate the world for a boolean API call?! *)
-  let is_app_user user =
-    (call user "isAppUser" [("uid", `B user.uid)])
-    >>= (fun r -> let b = r = "true" in
-	 let () = save_user {user with added=b} in return b)
-end
-
-module Fql =
-struct
-  include Namespace
-  let call user = call_method "fql" user
-
-  let query user q = call user "query" [("query", `S q)] >>= loadr
-end
