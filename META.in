@@ -1,5 +1,5 @@
 description = "Facebook Platform API"
 version = "@DISTVERSION@"
-requires = "unix,cohttp"
+requires = "unix,cohttp,json-wheel"
 archive(byte) = "facebook.cma"
 archive(native) = "facebook.cmxa"
